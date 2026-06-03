@@ -1,0 +1,8 @@
+.env
+data/
+__pycache__/
+*.pyc
+.spotify_cache
+youtube_auth.json
+.venv/
+venv/
