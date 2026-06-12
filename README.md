@@ -1,6 +1,6 @@
 # 🎵 migrate-music
 
-> Free, self-hosted migration of your liked songs between music streaming platforms — with smart cross-language matching and a review step before anything is written.
+### Move your liked songs between Spotify, YouTube Music & Yandex — free, self-hosted, with smart cross-language matching.
 
 **Supported (any direction):** 🟡 Yandex Music · 🟢 Spotify · 🔴 YouTube Music
 
