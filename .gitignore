@@ -7,3 +7,4 @@ youtube_auth.json
 .venv/
 venv/
 *.plist
+docs/demo.html

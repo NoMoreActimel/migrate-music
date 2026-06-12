@@ -4,6 +4,12 @@
 
 **Supported (any direction):** 🟡 Yandex Music · 🟢 Spotify · 🔴 YouTube Music
 
+![migrate-music match report — Yandex to Spotify](docs/screenshot.png)
+
+> Every match is reviewable before anything is written. Cross-language matching
+> handles Cyrillic↔Latin (`Сплин → Splean`, `Хаски → Husky`), `feat.`/remaster
+> noise, and ambiguous cases via an optional small-model pass.
+
 ---
 
 ## How it works
@@ -145,14 +151,23 @@ Migration time is **dominated by the SEARCH step against the *target*** (one loo
 | 🔴 YouTube | ~5 s | **~6–10 min** (~0.3–0.5 s/song) | ~5 s (batched) |
 | 🟡 Yandex | ~1 min | **~5–6 min** (~0.3 s/song) | ~10+ min (1/req) |
 
-**🟢 Spotify search is the hard one (Dev-Mode, post Feb-2026):**
-- *Measured:* a burst of ~**600–670** requests triggers a **punitive ~13–24 h ban**.
-- The API limit is a rolling 30 s window, so a **slow, throttled rate (~1 req / 2 s)** *should* sustain and finish 1,000 songs in **~35 min** — but whether it avoids the ban beyond ~600 is **not yet confirmed** (pending a live throttled run).
-- *Worst case* (hard daily cap): ~**600 songs/day** → ~1,000 songs over ~2 days, fully automated by the background agent.
+**🟢 Spotify search is the hard one (Dev-Mode, post Feb-2026) — measured:**
+- There's an **undocumented cumulative cap of ~650 requests per ~24 h**, then a
+  **punitive ~13–24 h ban**. We confirmed it's **rate-independent**: one run banned
+  at **~669** requests going fast (2–3/s), another at **~647** going slow (0.4/s,
+  throttle verified) — *same count, different rates*. So **throttling does not help**;
+  Spotify's docs only publish the rolling-30 s window and don't mention this cap.
+- Net throughput: **~650 songs/day** when Spotify is the target. The background
+  agent automates this — ~650/day, sleep out the ban, resume — e.g. **~4,500 songs
+  ≈ 7 days**, fully unattended. (Our reference run: 4,575 Yandex likes → 4,495 matched.)
+- Reads and the playlist write are cheap and **not** subject to this cap.
 
-**🔴 YouTube / 🟡 Yandex search rates are estimates** based on the libraries (not yet load-tested); they have no known punitive ban and should complete in minutes. Yandex needs the regional VPN throughout.
+**🔴 YouTube / 🟡 Yandex search rates are estimates** based on the libraries (not yet
+load-tested); they have no known punitive cap and should finish in minutes. Yandex
+needs the regional VPN throughout. **Migrating *to* YouTube/Yandex avoids the Spotify
+cap entirely** — only Spotify-as-target is slow.
 
-> **Legend:** *measured* = observed on this account; *estimated* = library-typical, to be confirmed.
+> **Legend:** *measured* = observed on a real account; *estimated* = library-typical.
 
 ### Background agent (for slow/large or Spotify-target runs)
 
