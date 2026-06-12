@@ -47,6 +47,8 @@ def _title_score(yt: dict, ct: dict) -> int:
     return max(
         fuzz.ratio(yt["core"], ct["core"]),
         fuzz.ratio(yt["translit"], ct["translit"]),
+        fuzz.ratio(yt.get("bare", ""), ct.get("bare", "")),
+        fuzz.ratio(yt.get("bare_translit", ""), ct.get("bare_translit", "")),
     )
 
 
@@ -73,6 +75,8 @@ def evaluate(y: dict, c: dict):
         return (2, 95, "core-title + artist-overlap")
     if yt["translit"] and yt["translit"] == ct["translit"] and _artist_overlap(ya["set_translit"], ca["set_translit"]):
         return (2, 93, "translit-title + artist-overlap")
+    if yt.get("bare") and yt["bare"] == ct.get("bare") and _artist_overlap(ya["set_norm"], ca["set_norm"]):
+        return (2, 92, "bare-title + artist-overlap")
 
     tscore = _title_score(yt, ct)
     ascore = _artist_score(ya, ca)

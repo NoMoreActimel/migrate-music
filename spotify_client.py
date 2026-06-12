@@ -90,33 +90,59 @@ def _search_once(sp, q: str, limit: int) -> dict:
     raise RateLimited(config.SPOTIFY_BAN_THRESHOLD_S)  # stuck on short 429s
 
 
-def search_tracks(sp, title: str, artists, limit: int = 10) -> list:
+def search_tracks(sp, title: str, artists, limit: int = 10, thorough: bool = False) -> list:
     """Try a few query shapes; return de-duplicated candidate dicts.
 
-    Propagates RateLimited (punitive ban). Other transient errors yield no
-    candidates for that query (the track becomes a miss and is retried later).
+    fast (default): stop at the first query that returns anything (1 request for
+    most tracks). thorough=True: MERGE results across all artist-scoped queries
+    so the real track surfaces even when an earlier query returned other songs by
+    the same artist — higher recall, more requests (used for miss recovery).
+
+    Propagates RateLimited (punitive ban). Other transient errors are skipped.
     """
+    import normalize as N
+
     primary = artists[0] if artists else ""
-    queries = []
+    last = artists[-1] if artists else ""          # often the composer (classical)
+    bare = N.strip_all_brackets(N.strip_feat(title)) or title  # annotations removed
+    t_primary, t_bare = N.translit(primary), N.translit(bare)
+
+    precise, broad = [], []                         # artist-scoped vs title-only
     if title and primary:
-        queries.append(f'track:"{title}" artist:"{primary}"')
-        queries.append(f"{primary} {title}")
-    if title:
-        queries.append(title)
+        precise += [f'track:"{title}" artist:"{primary}"', f"{primary} {title}"]
+    if bare and primary:
+        precise.append(f"{primary} {bare}")         # annotations stripped
+    if t_bare and t_primary and t_bare != bare.lower():
+        precise.append(f"{t_primary} {t_bare}".strip())  # transliterated
+    if bare and last and last != primary:
+        broad.append(f"{last} {bare}")              # composer-as-artist
+    if bare:
+        broad.append(bare)                          # title-only last resort
+    precise = list(dict.fromkeys(q for q in precise if q.strip()))
+    broad = list(dict.fromkeys(q for q in broad if q.strip()))
 
     seen = {}
-    for q in queries:
+
+    def run(q):
         try:
             res = _search_once(sp, q, limit)
         except RateLimited:
             raise
         except Exception:
-            continue
+            return
         for it in res.get("tracks", {}).get("items", []):
             if it and it["id"] not in seen:
                 seen[it["id"]] = _track_dict(it)
-        if seen:  # first query that yields anything wins; later ones are fallbacks
+
+    for q in precise:
+        run(q)
+        if seen and not thorough:                   # fast mode: first hit wins
             break
+    if not seen:                                    # nothing artist-scoped → fall back
+        for q in broad:
+            run(q)
+            if seen and not thorough:
+                break
     return list(seen.values())
 
 
@@ -148,37 +174,48 @@ def get_or_create_playlist(sp) -> str:
         print(f"Using existing playlist '{config.SPOTIFY_PLAYLIST_NAME}' ({existing})")
         return existing
 
-    pl = sp.user_playlist_create(
-        user_id,
-        config.SPOTIFY_PLAYLIST_NAME,
-        public=config.SPOTIFY_PLAYLIST_PUBLIC,
-        description="Imported from Yandex Music liked songs.",
+    # Use the modern POST /me/playlists — the deprecated /users/{id}/playlists
+    # form (what spotipy.user_playlist_create calls) is 403-forbidden in Dev Mode
+    # since Feb 2026.
+    token = sp.auth_manager.get_access_token(as_dict=False)
+    resp = _session.post(
+        "https://api.spotify.com/v1/me/playlists",
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        json={"name": config.SPOTIFY_PLAYLIST_NAME,
+              "public": config.SPOTIFY_PLAYLIST_PUBLIC,
+              "description": "Imported from Yandex Music liked songs."},
+        timeout=30,
     )
+    resp.raise_for_status()
+    pl = resp.json()
     print(f"Created playlist '{config.SPOTIFY_PLAYLIST_NAME}' ({pl['id']})")
     return pl["id"]
 
 
+def _added_log() -> dict:
+    import json
+    p = config.DATA_DIR / "added_uris.json"
+    return json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
+
+
+def _save_added_log(rec: dict) -> None:
+    import json
+    (config.DATA_DIR / "added_uris.json").write_text(
+        json.dumps(rec), encoding="utf-8")
+
+
 def existing_uris(sp, playlist_id: str) -> set:
-    uris, offset = set(), 0
-    while True:
-        page = sp.playlist_items(
-            playlist_id, fields="items(track(uri)),next", limit=100, offset=offset
-        )
-        items = page.get("items", [])
-        for it in items:
-            tr = it.get("track")
-            if tr and tr.get("uri"):
-                uris.add(tr["uri"])
-        if page.get("next"):
-            offset += 100
-        else:
-            break
-    return uris
+    # Dev Mode strips track.uri from playlist reads and 403s the old /tracks GET,
+    # so dedup against a LOCAL record of what we've added instead of the API.
+    return set(_added_log().get(playlist_id, []))
 
 
 def add_tracks(sp, playlist_id: str, uris) -> int:
-    present = existing_uris(sp, playlist_id)
-    to_add = [u for u in dict.fromkeys(uris) if u not in present]
+    rec = _added_log()
+    have = set(rec.get(playlist_id, []))
+    to_add = [u for u in dict.fromkeys(uris) if u not in have]
     for i in range(0, len(to_add), 100):
         sp.playlist_add_items(playlist_id, to_add[i : i + 100])
+    rec[playlist_id] = sorted(have | set(to_add))
+    _save_added_log(rec)
     return len(to_add)
