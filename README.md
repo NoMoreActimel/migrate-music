@@ -181,3 +181,16 @@ Migration time is **dominated by the SEARCH step against the *target*** (one loo
 | `auto_match.py` · `agent.sh` | Resumable background runner (macOS LaunchAgent) |
 
 Outputs (liked-song dumps, match results, review CSVs) land in `data/` (git-ignored).
+
+## Disclaimer
+
+Personal-use tool, provided as-is under the [MIT License](LICENSE) — no warranty.
+
+- **Not affiliated** with or endorsed by Yandex, Spotify, or Google/YouTube.
+- Uses **unofficial** community libraries (`yandex-music`, `ytmusicapi`); these
+  can break when a service changes its API.
+- **You are responsible** for complying with each service's Terms of Service.
+- Your OAuth tokens are powerful and stored **locally** (`.env`, `youtube_auth.json`).
+  Never commit them (they're git-ignored); revoke them when you're done.
+- Spotify Development Mode has a low daily request cap — see [Speed](#speed--rate-limits).
+
