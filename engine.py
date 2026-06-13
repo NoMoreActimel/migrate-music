@@ -47,21 +47,38 @@ def _write_csv(path, results):
 
 
 def migrate(source_name, target_name, playlist_name=None, public=False,
-            max_new=0, commit=False, no_model=False):
-    src = get_service(source_name)
+            max_new=0, commit=False, no_model=False, source_cache=None):
     tgt = get_service(target_name)
-    state = _state_file(src.name, tgt.name)
+    src_name = source_name.lower()
 
+    if source_cache:
+        # read the source liked list from a cached fetch (e.g. data/yandex_tracks.json)
+        # so we don't need live source access (handy when the source is geo-locked)
+        from pathlib import Path
+        from services.base import make_track
+        p = Path(source_cache)
+        if not p.is_absolute():
+            p = config.ROOT / source_cache
+        raw = json.loads(p.read_text(encoding="utf-8"))
+        liked = [make_track(src_name, t.get("id") or t.get("yandex_id"), t.get("title"),
+                            t.get("artists"), t.get("duration_ms"), t.get("album"),
+                            version=t.get("version")) for t in raw]
+        print(f"Loaded {len(liked)} tracks from cache '{source_cache}'; matching against {tgt.name}.")
+    else:
+        src = get_service(source_name)
+        src_name = src.name
+        print(f"Reading liked songs from {src_name}...")
+        liked = src.read_liked()
+        print(f"{len(liked)} liked on {src_name}; matching against {tgt.name}.")
+
+    state = _state_file(src_name, tgt.name)
     prior = {r["src_id"]: r for r in (_load(state) or [])}
-    print(f"Reading liked songs from {src.name}...")
-    liked = src.read_liked()
-    print(f"{len(liked)} liked on {src.name}; matching against {tgt.name}.")
 
     use_model = config.MODEL_FALLBACK and not no_model
     results, new_this_run, rate_limited = [], 0, False
 
     for t in liked:
-        sid = f"{src.name}:{t['id']}"
+        sid = f"{src_name}:{t['id']}"
         if sid in prior:
             results.append(prior[sid])
             continue
@@ -77,7 +94,7 @@ def migrate(source_name, target_name, playlist_name=None, public=False,
             (config.DATA_DIR / "retry_after.txt").write_text(str(e.retry_after or 3700))
             print(f"\n{tgt.name} rate limit after {new_this_run} new. Progress saved.")
             print(f"Resume after ~{e.retry_after}s: migrate.py sync "
-                  f"--source {src.name} --target {tgt.name}")
+                  f"--source {src_name} --target {tgt.name}")
             rate_limited = True
             break
 
@@ -105,9 +122,9 @@ def migrate(source_name, target_name, playlist_name=None, public=False,
     print()
 
     _save(state, results)
-    _write_csv(_csv_file(src.name, tgt.name), results)
+    _write_csv(_csv_file(src_name, tgt.name), results)
     matched = [r for r in results if r["match"]]
-    print(f"{len(matched)}/{len(results)} matched. CSV: {_csv_file(src.name, tgt.name)}")
+    print(f"{len(matched)}/{len(results)} matched. CSV: {_csv_file(src_name, tgt.name)}")
 
     remaining = len(liked) - len(results)
     if commit and not remaining and not rate_limited:

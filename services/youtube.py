@@ -46,7 +46,10 @@ class YouTubeMusicService(MusicService):
     def search(self, title, artists, limit=10) -> list:
         _throttle()
         q = " ".join(x for x in [(artists[0] if artists else ""), title] if x).strip()
-        res = self.yt.search(q, filter="songs", limit=limit)
+        try:
+            res = self.yt.search(q, filter="songs", limit=limit)
+        except Exception:
+            return []  # transient YT error -> treat as a miss (retried on resume)
         return [_to_track(t) for t in res[:limit] if t.get("videoId")]
 
     def get_or_create_playlist(self, name, public=False) -> str:

@@ -229,7 +229,8 @@ def cmd_sync(args):
     import engine
     engine.migrate(args.source, args.target, playlist_name=args.playlist,
                    public=args.public, max_new=args.max_new,
-                   commit=args.commit, no_model=args.no_model)
+                   commit=args.commit, no_model=args.no_model,
+                   source_cache=args.source_cache)
 
 
 # ── CLI ─────────────────────────────────────────────────────────────────────
@@ -260,6 +261,7 @@ def main():
     ps.add_argument("--commit", action="store_true", help="add matches to the target playlist")
     ps.add_argument("--no-model", action="store_true", help="skip the model fallback this run")
     ps.add_argument("--max-new", type=int, default=0, help="process at most N new tracks this session")
+    ps.add_argument("--source-cache", help="read source tracks from a cached JSON instead of live (e.g. data/yandex_tracks.json)")
 
     args = p.parse_args()
     {"fetch": cmd_fetch, "match": cmd_match, "add": cmd_add,
