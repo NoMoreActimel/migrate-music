@@ -77,10 +77,34 @@ def migrate(source_name, target_name, playlist_name=None, public=False,
     use_model = config.MODEL_FALLBACK and not no_model
     results, new_this_run, rate_limited = [], 0, False
 
+    # Create the playlist UP-FRONT and add matches incrementally during matching,
+    # so writes happen while auth is fresh (a long run can outlive a browser cookie).
+    pid = None
+    if commit:
+        if not playlist_name:
+            sys.exit("Pass --playlist NAME with --commit.")
+        pid = tgt.get_or_create_playlist(playlist_name, public=public)
+        print(f"Target playlist '{playlist_name}' ({pid}) — adding as matches are found.")
+    pending, added_total = [], 0
+
+    def flush():
+        nonlocal added_total
+        if pid and pending:
+            added_total += tgt.add_tracks(pid, [r["match"]["id"] for r in pending])
+            for r in pending:
+                r["added"] = True
+            pending.clear()
+            _save(state, results)
+
     for t in liked:
         sid = f"{src_name}:{t['id']}"
         if sid in prior:
-            results.append(prior[sid])
+            rec = prior[sid]
+            results.append(rec)
+            if pid and rec.get("match") and not rec.get("added"):
+                pending.append(rec)          # resume: add matches not yet written
+                if len(pending) >= 100:
+                    flush()
             continue
         if max_new and new_this_run >= max_new:
             print(f"\nReached --max-new={max_new}; stopping this session.")
@@ -114,29 +138,24 @@ def migrate(source_name, target_name, playlist_name=None, public=False,
 
         results.append(rec)
         new_this_run += 1
+        if pid and rec["match"]:
+            pending.append(rec)
+            if len(pending) >= 100:
+                flush()
         if new_this_run % 10 == 0:
             done = sum(1 for r in results if r["match"])
             print(f"  +{new_this_run} new | {done}/{len(results)} matched", end="\r")
         if new_this_run % 25 == 0:
             _save(state, results)
+    flush()  # write any remaining matches
     print()
 
     _save(state, results)
     _write_csv(_csv_file(src_name, tgt.name), results)
     matched = [r for r in results if r["match"]]
     print(f"{len(matched)}/{len(results)} matched. CSV: {_csv_file(src_name, tgt.name)}")
-
-    remaining = len(liked) - len(results)
-    if commit and not remaining and not rate_limited:
-        if not playlist_name:
-            sys.exit("Pass --playlist NAME to add matches to a playlist.")
-        ids = [r["match"]["id"] for r in matched]
-        print(f"Adding {len(ids)} tracks to '{playlist_name}' on {tgt.name}...")
-        pid = tgt.get_or_create_playlist(playlist_name, public=public)
-        added = tgt.add_tracks(pid, ids)
-        print(f"Added {added} new tracks (playlist {pid}).")
-    elif commit and remaining:
-        print(f"{remaining} tracks left to match — finish matching before --commit.")
+    if pid:
+        print(f"Added {added_total} new tracks to '{playlist_name}' ({pid}).")
 
     if rate_limited:
         sys.exit(75)
