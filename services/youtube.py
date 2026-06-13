@@ -62,7 +62,7 @@ class YouTubeMusicService(MusicService):
 
     def add_tracks(self, playlist_id, track_ids) -> int:
         ids = list(dict.fromkeys(track_ids))
-        if not ids:
-            return 0
-        self.yt.add_playlist_items(playlist_id, ids, duplicates=False)
+        for i in range(0, len(ids), 100):           # batch — avoid huge single call
+            _throttle()
+            self.yt.add_playlist_items(playlist_id, ids[i:i + 100], duplicates=False)
         return len(ids)
